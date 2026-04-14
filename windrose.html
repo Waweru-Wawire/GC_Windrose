@@ -6,36 +6,22 @@
   <title>Wind Rose</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
   <style>
-    /* ── Reset & base ─────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       font-size: 13px;
       background: #ffffff;
       color: #1a1a1a;
       padding: 16px;
-      min-height: 100vh;
     }
-
-    /* ── Header ───────────────────────────────────────────────── */
     #site-header {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
       margin-bottom: 14px;
-      gap: 8px;
     }
-    #site-name {
-      font-size: 15px;
-      font-weight: 600;
-      color: #1a1a1a;
-    }
-    #site-coords {
-      font-size: 11px;
-      color: #666;
-      margin-top: 2px;
-    }
+    #site-name { font-size: 15px; font-weight: 600; }
+    #site-coords { font-size: 11px; color: #666; margin-top: 2px; }
     #height-badge {
       font-size: 11px;
       background: #e8f0fb;
@@ -43,10 +29,7 @@
       border-radius: 4px;
       padding: 3px 8px;
       white-space: nowrap;
-      flex-shrink: 0;
     }
-
-    /* ── Stat row ─────────────────────────────────────────────── */
     #stats {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -65,47 +48,28 @@
       letter-spacing: 0.04em;
       margin-bottom: 2px;
     }
-    .stat-value {
-      font-size: 18px;
-      font-weight: 600;
-      color: #1a1a1a;
-    }
-    .stat-unit {
-      font-size: 11px;
-      color: #888;
-      margin-left: 2px;
-    }
-
-    /* ── Height selector ──────────────────────────────────────── */
+    .stat-value { font-size: 18px; font-weight: 600; }
+    .stat-unit  { font-size: 11px; color: #888; margin-left: 2px; }
     #controls {
       display: flex;
       align-items: center;
       gap: 8px;
       margin-bottom: 14px;
-      flex-wrap: wrap;
     }
-    #controls label {
-      font-size: 12px;
-      color: #666;
-    }
+    #controls label { font-size: 12px; color: #666; }
     #height-select {
       font-size: 12px;
       padding: 4px 8px;
       border: 1px solid #ccc;
       border-radius: 4px;
       background: #fff;
-      color: #1a1a1a;
       cursor: pointer;
     }
-
-    /* ── Chart area ───────────────────────────────────────────── */
     #chart-wrap {
       position: relative;
       width: 100%;
       height: 320px;
     }
-
-    /* ── Legend ───────────────────────────────────────────────── */
     #legend {
       display: flex;
       flex-wrap: wrap;
@@ -125,8 +89,6 @@
       border-radius: 2px;
       flex-shrink: 0;
     }
-
-    /* ── State messages ───────────────────────────────────────── */
     #message {
       text-align: center;
       padding: 40px 16px;
@@ -135,28 +97,16 @@
       line-height: 1.6;
     }
     #message.error { color: #b00020; }
-
-    /* ── Attribution ──────────────────────────────────────────── */
     #attribution {
       margin-top: 14px;
       font-size: 10px;
       color: #aaa;
       line-height: 1.5;
     }
+    #attribution a { color: #aaa; }
   </style>
 </head>
 <body>
-
-<!-- ============================================================
-  STRUCTURE OVERVIEW
-  1. Header  – site name, coordinates, height badge
-  2. Stats   – mean speed, dominant direction, max sector speed
-  3. Controls – height selector (re-fetches on change)
-  4. Chart   – polar area wind rose (Chart.js)
-  5. Legend  – speed bin colours explained
-  6. Message – shown instead of chart while loading / on error
-  7. Attribution – required GWA credit line
-============================================================ -->
 
 <div id="site-header">
   <div>
@@ -168,15 +118,15 @@
 
 <div id="stats">
   <div class="stat-card">
-    <div class="stat-label">Mean speed</div>
-    <div class="stat-value" id="stat-mean">–<span class="stat-unit">m/s</span></div>
+    <div class="stat-label">Total power density</div>
+    <div class="stat-value" id="stat-total">–<span class="stat-unit">W/m²</span></div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Dominant dir.</div>
+    <div class="stat-label">Dominant direction</div>
     <div class="stat-value" id="stat-dir">–</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Peak sector</div>
+    <div class="stat-label">Peak sector speed</div>
     <div class="stat-value" id="stat-peak">–<span class="stat-unit">m/s</span></div>
   </div>
 </div>
@@ -197,8 +147,8 @@
 <div id="chart-wrap" style="display:none;">
   <canvas id="roseChart"
     role="img"
-    aria-label="Polar area wind rose showing mean wind speed per 30-degree direction sector">
-    Wind rose chart: mean wind speed by direction sector.
+    aria-label="Polar area wind rose showing wind speed per 30-degree direction sector">
+    Wind rose chart: wind speed by direction sector.
   </canvas>
 </div>
 
@@ -209,277 +159,150 @@
   <a href="https://globalwindatlas.info" target="_blank" rel="noopener">globalwindatlas.info</a>
 </div>
 
-
 <script>
 // ================================================================
-//  SECTION 1 – CONFIGURATION
-//  Adjust these constants if your setup changes.
+//  CONFIGURATION — update PROXY_URL to your Cloudflare worker URL
 // ================================================================
+const PROXY_URL = "https://gwa-waweru.brandonwawire12.workers.dev";
 
-// The GWA API endpoint that returns a GWC JSON for a lat/lon.
-// It returns Weibull A, k, and sector frequencies for all heights
-// and roughness classes.
-const GWA_API = "https://globalwindatlas.info/api/gwa/custom/Lib";
-
-// The 12 direction labels, one per 30° sector starting at North.
-const DIRECTIONS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
-// GWA gives 12 sectors: 0°, 30°, 60° … 330°
-const SECTOR_LABELS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW"];
-// Actually GWA uses: 0=N, 30=NNE, 60=NE, 90=ENE, 120=E, 150=ESE,
-//                   180=SE, 210=SSE, 240=S, 270=SSW, 300=SW, 330=WSW
-// ↑ Recheck against your GWC .lib file — label mapping differs by convention.
-
-// Speed bins for colour-coding bars (m/s). Each bar's colour
-// reflects which bin its mean speed falls into.
+// Speed bins for colour coding — each sector bar gets coloured
+// based on which bin its wind speed value falls into
 const SPEED_BINS = [
-  { max: 3,   label: "< 3 m/s",   color: "#b3d9f7" },
-  { max: 5,   label: "3–5 m/s",   color: "#5aaee8" },
-  { max: 7,   label: "5–7 m/s",   color: "#1d7cc4" },
-  { max: 9,   label: "7–9 m/s",   color: "#0f4f8a" },
-  { max: 999, label: "> 9 m/s",   color: "#072d54" },
+  { max: 2,   label: "< 2 m/s",   color: "#cce5ff" },
+  { max: 4,   label: "2–4 m/s",   color: "#70b8f4" },
+  { max: 6,   label: "4–6 m/s",   color: "#2186d3" },
+  { max: 8,   label: "6–8 m/s",   color: "#0f5298" },
+  { max: 999, label: "> 8 m/s",   color: "#072d54" },
 ];
 
-// Roughness class index to use from the GWC.
-// 0 = open sea (z0=0.0001 m), 1 = open land (z0=0.03 m) — typical default.
-// Indices: [0.0001, 0.03, 0.10, 0.40, 1.50] roughness lengths.
-const ROUGHNESS_IDX = 1;  // open land — change if your sites are coastal/forest
+// Compass labels for each 30° sector
+// Sector 1 = 0° = North, Sector 2 = 30° = NNE, etc.
+const DIR_LABELS = {
+  0:   "N",   30:  "NNE", 60:  "NE",  90:  "ENE",
+  120: "E",   150: "ESE", 180: "SE",  210: "SSE",
+  240: "S",   270: "SSW", 300: "SW",  330: "WSW"
+};
 
 
 // ================================================================
-//  SECTION 2 – URL PARAMETER PARSING
-//
-//  Dashboard's "Embedded content by features" appends field values
-//  to your URL, e.g.:
-//    https://yourhost.com/windrose.html?lat=51.23&lon=8.45&height=100&name=Site+A
-//
-//  This function reads those parameters. If the page loads without
-//  params (e.g. during development), you can hard-code defaults.
+//  URL PARAMETER PARSING
+//  Dashboard injects lat, lon, height, site_id into the URL
 // ================================================================
-
 function getParams() {
   const p = new URLSearchParams(window.location.search);
   return {
-    lat:    parseFloat(p.get("lat")    ?? "51.5"),   // fallback: Frankfurt area
-    lon:    parseFloat(p.get("lon")    ?? "8.3"),
-    height: parseInt(  p.get("height") ?? "100", 10),
-    name:   p.get("Id") ?? "Selected site",
+    lat:     parseFloat(p.get("lat")     ?? "NaN"),
+    lon:     parseFloat(p.get("lon")     ?? "NaN"),
+    height:  parseInt(  p.get("height")  ?? "100", 10),
+    site_id: p.get("site_id") ?? "Selected site",
   };
 }
 
 
 // ================================================================
-//  SECTION 3 – GWA API CALL
-//
-//  The GWA REST endpoint accepts lat/lon and returns JSON containing
-//  the Generalized Wind Climate (GWC) for that grid cell.
-//
-//  Response structure (simplified):
-//  {
-//    "GWC": {
-//      "roughness_classes": [
-//        {
-//          "roughness_length": 0.03,
-//          "heights": [
-//            {
-//              "height": 100,
-//              "sectors": [
-//                { "direction": 0,   "A": 7.2, "k": 2.1, "frequency": 0.05 },
-//                { "direction": 30,  "A": 8.1, "k": 2.0, "frequency": 0.08 },
-//                ...
-//              ]
-//            }
-//          ]
-//        }
-//      ]
-//    }
-//  }
-//
-//  NOTE: The exact JSON structure from globalwindatlas.info may vary.
-//  If it doesn't match, open DevTools → Network, call the URL manually,
-//  and adjust the parsing in extractSectors() below.
+//  API CALL — POST to GWA via Cloudflare proxy worker
+//  The worker builds the bounding box and forwards to GWA
 // ================================================================
+async function fetchWindRose(lat, lon, height) {
+  const url =
+    `${PROXY_URL}?lat=${lat}&lon=${lon}&height=${height}`;
 
-async function fetchGWC(lat, lon) {
-  // Build the query string. The GWA API uses ?lat=&lon= format.
-  const url = `${GWA_API}?lat=${lat}&lon=${lon}`;
-
-  const resp = await fetch(url, {
-    headers: { "Accept": "application/json" }
-  });
+  const resp = await fetch(url);
 
   if (!resp.ok) {
-    throw new Error(`GWA API returned ${resp.status}: ${resp.statusText}`);
+    throw new Error(`Proxy returned ${resp.status}: ${resp.statusText}`);
   }
 
-  return resp.json();
-}
+  const data = await resp.json();
 
-
-// ================================================================
-//  SECTION 4 – DATA EXTRACTION & WEIBULL DECODING
-//
-//  The GWC stores wind speed as a Weibull distribution per sector:
-//    A = scale parameter (related to mean speed)
-//    k = shape parameter (controls spread of speeds)
-//
-//  Mean wind speed from Weibull:
-//    mean = A × Γ(1 + 1/k)
-//
-//  where Γ is the Gamma function. We use Lanczos approximation
-//  since Math doesn't include it natively.
-// ================================================================
-
-// Lanczos approximation of the Gamma function.
-// Accurate to ~15 significant figures for Re(z) > 0.5.
-// You don't need to understand the maths — just know it converts
-// Weibull A and k into a mean wind speed.
-function gamma(z) {
-  const g = 7;
-  const C = [
-    0.99999999999980993,
-    676.5203681218851,
-    -1259.1392167224028,
-    771.32342877765313,
-    -176.61502916214059,
-    12.507343278686905,
-    -0.13857109526572012,
-    9.9843695780195716e-6,
-    1.5056327351493116e-7,
-  ];
-  if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
-  z -= 1;
-  let x = C[0];
-  for (let i = 1; i < g + 2; i++) x += C[i] / (z + i);
-  const t = z + g + 0.5;
-  return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * x;
-}
-
-// Mean wind speed from Weibull parameters.
-function weibullMean(A, k) {
-  return A * gamma(1 + 1 / k);
-}
-
-// Pull the sector data for our chosen roughness class and height.
-// Returns array of 12 objects: { direction, meanSpeed, frequency }
-function extractSectors(gwcJson, heightM) {
-
-  // ── Adjust this block if the API JSON structure differs ──────
-  // Try to find the roughness class by index.
-  const roughnessClasses = gwcJson?.GWC?.roughness_classes
-                        ?? gwcJson?.roughness_classes
-                        ?? [];
-
-  if (!roughnessClasses.length) {
-    throw new Error("Could not find roughness_classes in GWA response. " +
-                    "Check DevTools > Network for the actual JSON shape.");
+  // Validate we got a rose array back
+  if (!data.rose || !Array.isArray(data.rose)) {
+    throw new Error(
+      "Unexpected response from GWA — 'rose' array not found. " +
+      "Check browser console for full response."
+    );
   }
 
-  const rc = roughnessClasses[ROUGHNESS_IDX] ?? roughnessClasses[0];
-
-  // Find the closest available height to what was requested.
-  const heights = rc.heights ?? [];
-  if (!heights.length) throw new Error("No height data in GWA response.");
-
-  const heightObj = heights.reduce((best, h) =>
-    Math.abs(h.height - heightM) < Math.abs(best.height - heightM) ? h : best
-  );
-
-  const sectors = heightObj.sectors ?? [];
-  if (!sectors.length) throw new Error("No sector data in GWA response.");
-  // ─────────────────────────────────────────────────────────────
-
-  return sectors.map(s => ({
-    direction:  s.direction,
-    meanSpeed:  weibullMean(s.A, s.k),
-    frequency:  s.frequency,  // fraction 0–1 (or percentage, check units)
-  }));
+  return data;
 }
 
 
 // ================================================================
-//  SECTION 5 – CHART RENDERING
-//
-//  We use Chart.js PolarArea chart. Each sector is one "slice"
-//  of the polar chart. The radius of each slice = mean wind speed
-//  for that direction. The colour = speed bin.
-//
-//  Chart.js polar area starts at 3 o'clock (East) and goes
-//  counter-clockwise. We need North at top, clockwise.
-//  Fix: rotate chart by -90° and reverse sector order.
+//  CHART RENDERING
+//  Polar area chart — one slice per 30° sector
+//  Radius of slice = wind speed value for that direction
 // ================================================================
+let roseChart = null;
 
-let roseChart = null;  // keep reference so we can destroy on re-render
-
-function speedColor(ms) {
+function speedColor(value) {
   for (const bin of SPEED_BINS) {
-    if (ms < bin.max) return bin.color;
+    if (value < bin.max) return bin.color;
   }
   return SPEED_BINS[SPEED_BINS.length - 1].color;
 }
 
-function renderRose(sectors) {
+function renderRose(rose) {
   const canvas = document.getElementById("roseChart");
 
-  // Destroy previous chart instance to avoid memory leak
+  // Destroy previous instance to avoid memory leak on re-render
   if (roseChart) { roseChart.destroy(); roseChart = null; }
 
-  // Build data arrays in sector order (0°=N first, then clockwise)
-  const labels     = sectors.map(s => dirLabel(s.direction));
-  const speeds     = sectors.map(s => parseFloat(s.meanSpeed.toFixed(2)));
-  const colors     = speeds.map(speedColor);
-  const borderColors = colors.map(c => c);  // same, could add opacity
+  // Sort sectors by center_degrees so they always go N → NNE → NE etc.
+  const sorted = [...rose].sort((a, b) => a.center_degrees - b.center_degrees);
 
-  // Chart.js polar area options
+  const labels  = sorted.map(s => DIR_LABELS[s.center_degrees] ?? `${s.center_degrees}°`);
+  const values  = sorted.map(s => parseFloat(s.value.toFixed(3)));
+  const colors  = values.map(speedColor);
+
   roseChart = new Chart(canvas, {
     type: "polarArea",
     data: {
       labels,
       datasets: [{
-        label: "Mean wind speed (m/s)",
-        data: speeds,
-        backgroundColor: colors.map(c => c + "cc"),  // add alpha
+        label: "Wind speed (m/s)",
+        data:            values,
+        backgroundColor: colors.map(c => c + "cc"),  // slight transparency
         borderColor:     colors,
-        borderWidth: 1,
+        borderWidth:     1,
       }]
     },
     options: {
-      responsive: true,
+      responsive:          true,
       maintainAspectRatio: false,
-      animation: { duration: 400 },
+      animation:           { duration: 500 },
 
-      // Rotate so North (sector 0) is at the top.
-      // PolarArea default starts at 3 o'clock; -90° shifts to 12 o'clock.
+      // Rotate so North (0°) sits at the top
+      // Chart.js polar default starts at 3 o'clock (East)
+      // -90° shifts it to 12 o'clock (North)
       startAngle: -Math.PI / 2,
 
       scales: {
         r: {
           beginAtZero: true,
           ticks: {
-            stepSize: 2,
-            font: { size: 10 },
-            color: "#888",
-            // Show speed value on radial grid rings
-            callback: v => v > 0 ? v + " m/s" : "",
-            backdropColor: "rgba(255,255,255,0.7)",
+            font:          { size: 10 },
+            color:         "#888",
+            backdropColor: "rgba(255,255,255,0.75)",
+            callback:      v => v > 0 ? v.toFixed(1) : "",
           },
-          grid:      { color: "rgba(0,0,0,0.08)" },
-          angleLines: { color: "rgba(0,0,0,0.08)" },
+          grid:        { color: "rgba(0,0,0,0.07)" },
+          angleLines:  { color: "rgba(0,0,0,0.07)" },
           pointLabels: {
-            font: { size: 11, weight: "500" },
+            font:  { size: 11, weight: "500" },
             color: "#333",
           },
         }
       },
 
       plugins: {
-        legend: { display: false },  // we build our own below
+        legend: { display: false },  // using custom HTML legend below
         tooltip: {
           callbacks: {
             label: ctx => {
-              const sec = sectors[ctx.dataIndex];
+              const s = sorted[ctx.dataIndex];
               return [
-                ` Speed: ${sec.meanSpeed.toFixed(1)} m/s`,
-                ` Freq:  ${(sec.frequency * 100).toFixed(1)}%`,
+                ` Direction: ${DIR_LABELS[s.center_degrees]} (${s.center_degrees}°)`,
+                ` Wind speed: ${s.value.toFixed(2)} m/s`,
               ];
             }
           }
@@ -489,46 +312,38 @@ function renderRose(sectors) {
   });
 }
 
-// Convert 0-330° to compass label
-function dirLabel(deg) {
-  const labels = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
-  // 12 GWA sectors at 30° steps; map to 16-point compass approx.
-  const idx = Math.round(deg / 22.5) % 16;
-  return labels[idx];
-}
-
 
 // ================================================================
-//  SECTION 6 – UI HELPERS
-//  Update the header, stats bar, and legend from sector data.
+//  UI HELPERS
 // ================================================================
-
-function updateHeader(params, actualHeight) {
-  document.getElementById("site-name").textContent = params.name;
+function updateHeader(params) {
+  document.getElementById("site-name").textContent   = params.site_id;
   document.getElementById("site-coords").textContent =
-    `${params.lat.toFixed(4)}° N, ${params.lon.toFixed(4)}° E`;
-  document.getElementById("height-badge").textContent =
-    `${actualHeight} m`;
-  document.getElementById("height-select").value =
-    String(params.height);
+    `${params.lat.toFixed(4)}° N,  ${params.lon.toFixed(4)}° E`;
+  document.getElementById("height-badge").textContent = `${params.height} m`;
+  document.getElementById("height-select").value      = String(params.height);
 }
 
-function updateStats(sectors) {
-  // Frequency-weighted mean speed across all sectors
-  const totalFreq = sectors.reduce((s, x) => s + x.frequency, 0);
-  const meanSpeed = sectors.reduce((s, x) => s + x.meanSpeed * x.frequency, 0) / totalFreq;
+function updateStats(data) {
+  const rose = data.rose;
 
-  // Dominant direction = sector with highest frequency
-  const dom = sectors.reduce((best, x) => x.frequency > best.frequency ? x : best);
+  // Total power density comes directly from API response
+  const total = data.total ?? 0;
 
-  // Peak sector = highest mean speed
-  const peak = sectors.reduce((best, x) => x.meanSpeed > best.meanSpeed ? x : best);
+  // Dominant direction = sector with highest wind speed value
+  const dominant = rose.reduce((best, s) => s.value > best.value ? s : best);
 
-  document.getElementById("stat-mean").innerHTML =
-    meanSpeed.toFixed(1) + '<span class="stat-unit">m/s</span>';
-  document.getElementById("stat-dir").textContent = dirLabel(dom.direction);
+  // Peak sector = same as dominant for speed rose
+  const peak = dominant;
+
+  document.getElementById("stat-total").innerHTML =
+    Math.round(total) + '<span class="stat-unit">W/m²</span>';
+
+  document.getElementById("stat-dir").textContent =
+    DIR_LABELS[dominant.center_degrees] ?? `${dominant.center_degrees}°`;
+
   document.getElementById("stat-peak").innerHTML =
-    peak.meanSpeed.toFixed(1) + '<span class="stat-unit">m/s</span>';
+    peak.value.toFixed(1) + '<span class="stat-unit">m/s</span>';
 }
 
 function updateLegend() {
@@ -543,154 +358,61 @@ function updateLegend() {
 
 function showMessage(text, isError = false) {
   const m = document.getElementById("message");
-  m.textContent = text;
-  m.className = isError ? "error" : "";
+  m.textContent  = text;
+  m.className    = isError ? "error" : "";
   m.style.display = "block";
   document.getElementById("chart-wrap").style.display = "none";
-  document.getElementById("legend").style.display = "none";
+  document.getElementById("legend").style.display     = "none";
 }
 
 function showChart() {
-  document.getElementById("message").style.display = "none";
+  document.getElementById("message").style.display    = "none";
   document.getElementById("chart-wrap").style.display = "block";
-  document.getElementById("legend").style.display = "flex";
+  document.getElementById("legend").style.display     = "flex";
 }
 
 
 // ================================================================
-//  SECTION 7 – MAIN ORCHESTRATION
-//
-//  This is the entry point. Call load() on page load and whenever
-//  the height selector changes.
+//  MAIN — fetch data and render everything
 // ================================================================
-
 async function load(params) {
   showMessage("Fetching wind data from Global Wind Atlas…");
 
   try {
-    const gwcJson = await fetchGWC(params.lat, params.lon);
-    const sectors = extractSectors(gwcJson, params.height);
+    const data = await fetchWindRose(params.lat, params.lon, params.height);
 
-    updateHeader(params, params.height);
-    updateStats(sectors);
+    updateHeader(params);
+    updateStats(data);
     updateLegend();
-    renderRose(sectors);
+    renderRose(data.rose);
     showChart();
 
   } catch (err) {
-    // ── CORS / network errors ──────────────────────────────────
-    // If you see "Failed to fetch" here, the GWA API is blocking
-    // cross-origin requests from your host. Solution: add a thin
-    // proxy (see bottom of this file for a simple Cloudflare Worker
-    // snippet) and point GWA_API at your proxy URL instead.
     console.error("Wind rose error:", err);
     showMessage(
-      `Could not load wind data: ${err.message}\n\n` +
-      "Check the browser console and verify the GWA API is reachable from this host.",
+      `Could not load wind data: ${err.message}`,
       true
     );
   }
 }
 
-// ── Height selector change ────────────────────────────────────────
-// Re-run load() with the same lat/lon but updated height.
+// Re-fetch when height selector changes
 document.getElementById("height-select").addEventListener("change", e => {
-  const params = getParams();
-  params.height = parseInt(e.target.value, 10);
+  const params   = getParams();
+  params.height  = parseInt(e.target.value, 10);
   load(params);
 });
 
-// ── Initial page load ─────────────────────────────────────────────
-// Reads lat/lon/height from the URL and kicks everything off.
+// Initial load — reads params from URL
 (function init() {
   const params = getParams();
-
-  // If no lat/lon in URL, show waiting state (Dashboard hasn't
-  // sent a selection yet — this is normal on first load).
   if (isNaN(params.lat) || isNaN(params.lon)) {
     showMessage("Select a wind site on the map to load its wind rose.");
     return;
   }
-
   load(params);
 })();
 </script>
-
-<!--
-================================================================
-  PROXY SNIPPET (Cloudflare Worker) — use if CORS blocks you
-================================================================
-
-  If the GWA API rejects cross-origin requests from your host,
-  deploy this as a Cloudflare Worker at e.g. wind-proxy.yourname.workers.dev
-  and change GWA_API above to point to it.
-
-  Worker code (paste into Cloudflare dashboard → Workers → new worker):
-
-  export default {
-    async fetch(request) {
-      const url = new URL(request.url);
-      const lat = url.searchParams.get("lat");
-      const lon = url.searchParams.get("lon");
-
-      const gwaUrl = `https://globalwindatlas.info/api/gwa/custom/Lib?lat=${lat}&lon=${lon}`;
-      const resp = await fetch(gwaUrl, { headers: { "Accept": "application/json" } });
-      const body = await resp.text();
-
-      return new Response(body, {
-        status: resp.status,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",   // allows any host to call this proxy
-        }
-      });
-    }
-  };
-
-================================================================
-  HOW TO WIRE THIS INTO ARCGIS DASHBOARD
-================================================================
-
-  1. Host this file at an HTTPS URL, e.g.:
-       https://wind-rose.yourorg.com/windrose.html
-     or GitHub Pages:
-       https://yourusername.github.io/windrose/windrose.html
-
-  2. In your Feature Layer, ensure these numeric fields exist:
-       lat      (Double)
-       lon      (Double)
-       height_m (Long Integer) — optional, defaults to 100
-
-  3. In Dashboard, add an "Embedded Content" element:
-       - Type:        By features
-       - Data source: your wind sites feature layer
-       - URL template:
-           https://wind-rose.yourorg.com/windrose.html?lat={lat}&lon={lon}&height={height_m}&name={site_name}
-       (Replace {lat} etc. with your actual field names)
-
-  4. Add a Dashboard Action:
-       - Source:  Map widget (wind sites layer)
-       - Trigger: Selection change
-       - Target:  Embedded Content element
-       - Action:  Filter
-
-  5. Test: click a site on the map — the rose should update
-     within ~1-2 seconds (one GWA API call).
-
-================================================================
-  TESTING WITHOUT DASHBOARD
-================================================================
-
-  Open the file directly with params in the URL, e.g.:
-    file:///path/to/windrose.html?lat=51.5&lon=8.3&height=100&name=TestSite
-
-  Or run a local server:
-    python -m http.server 8080
-  then visit:
-    http://localhost:8080/windrose.html?lat=51.5&lon=8.3&height=100
-
-================================================================
--->
 
 </body>
 </html>
