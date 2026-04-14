@@ -24,8 +24,8 @@
     #site-coords { font-size: 11px; color: #666; margin-top: 2px; }
     #height-badge {
       font-size: 11px;
-      background: #e8f0fb;
-      color: #1a56b0;
+      background: #e8f5e9;
+      color: #1b5e20;
       border-radius: 4px;
       padding: 3px 8px;
       white-space: nowrap;
@@ -68,7 +68,7 @@
     #chart-wrap {
       position: relative;
       width: 100%;
-      height: 320px;
+      height: 340px;
     }
     #legend {
       display: flex;
@@ -160,80 +160,47 @@
 </div>
 
 <script>
-// ================================================================
-//  CONFIGURATION — update PROXY_URL to your Cloudflare worker URL
-// ================================================================
+// ── Configuration ─────────────────────────────────────────────
 const PROXY_URL = "https://gwa-waweru.brandonwawire12.workers.dev";
 
-// Speed bins for colour coding — each sector bar gets coloured
-// based on which bin its wind speed value falls into
+// Green gradient speed bins — light to dark as speed increases
 const SPEED_BINS = [
-  { max: 2,   label: "< 2 m/s",   color: "#cce5ff" },
-  { max: 4,   label: "2–4 m/s",   color: "#70b8f4" },
-  { max: 6,   label: "4–6 m/s",   color: "#2186d3" },
-  { max: 8,   label: "6–8 m/s",   color: "#0f5298" },
-  { max: 999, label: "> 8 m/s",   color: "#072d54" },
+  { max: 2,   label: "< 2 m/s",  color: "#c8e6c9" },  // very light green
+  { max: 4,   label: "2–4 m/s",  color: "#66bb6a" },  // light green
+  { max: 6,   label: "4–6 m/s",  color: "#2e7d32" },  // mid green
+  { max: 8,   label: "6–8 m/s",  color: "#1b5e20" },  // dark green
+  { max: 999, label: "> 8 m/s",  color: "#0a280d" },  // very dark green
 ];
 
-// Compass labels for each 30° sector
-// Sector 1 = 0° = North, Sector 2 = 30° = NNE, etc.
 const DIR_LABELS = {
   0:   "N",   30:  "NNE", 60:  "NE",  90:  "ENE",
   120: "E",   150: "ESE", 180: "SE",  210: "SSE",
   240: "S",   270: "SSW", 300: "SW",  330: "WSW"
 };
 
-
-// ================================================================
-//  URL PARAMETER PARSING
-//  Dashboard injects lat, lon, height, site_id into the URL
-// ================================================================
+// ── URL params ────────────────────────────────────────────────
 function getParams() {
   const p = new URLSearchParams(window.location.search);
   return {
-    lat:     parseFloat(p.get("lat")     ?? "NaN"),
-    lon:     parseFloat(p.get("lon")     ?? "NaN"),
-    height:  parseInt(  p.get("height")  ?? "100", 10),
+    lat:     parseFloat(p.get("lat")    ?? "NaN"),
+    lon:     parseFloat(p.get("lon")    ?? "NaN"),
+    height:  parseInt(  p.get("height") ?? "100", 10),
     site_id: p.get("site_id") ?? "Selected site",
   };
 }
 
-
-// ================================================================
-//  API CALL — POST to GWA via Cloudflare proxy worker
-//  The worker builds the bounding box and forwards to GWA
-// ================================================================
+// ── API call ──────────────────────────────────────────────────
 async function fetchWindRose(lat, lon, height) {
-  const url =
-    `${PROXY_URL}?lat=${lat}&lon=${lon}&height=${height}`;
-
-  const resp = await fetch(url);
-
-  if (!resp.ok) {
-    throw new Error(`Proxy returned ${resp.status}: ${resp.statusText}`);
-  }
-
+  const resp = await fetch(`${PROXY_URL}?lat=${lat}&lon=${lon}&height=${height}`);
+  if (!resp.ok) throw new Error(`Proxy returned ${resp.status}`);
   const data = await resp.json();
-
-  // Validate we got a rose array back
   if (!data.rose || !Array.isArray(data.rose)) {
-    throw new Error(
-      "Unexpected response from GWA — 'rose' array not found. " +
-      "Check browser console for full response."
-    );
+    throw new Error("Unexpected response — rose array not found.");
   }
-
   return data;
 }
 
-
-// ================================================================
-//  CHART RENDERING
-//  Polar area chart — one slice per 30° sector
-//  Radius of slice = wind speed value for that direction
-// ================================================================
-let roseChart = null;
-
+// ── Colour helper ─────────────────────────────────────────────
 function speedColor(value) {
   for (const bin of SPEED_BINS) {
     if (value < bin.max) return bin.color;
@@ -241,68 +208,112 @@ function speedColor(value) {
   return SPEED_BINS[SPEED_BINS.length - 1].color;
 }
 
+// ── Chart ─────────────────────────────────────────────────────
+let roseChart = null;
+
+// Custom plugin: draws percentage labels inside each sector petal
+// mimicking the GWA style
+const petalLabelPlugin = {
+  id: "petalLabels",
+  afterDatasetDraw(chart) {
+    const { ctx, data } = chart;
+    const meta = chart.getDatasetMeta(0);
+    const total = data.datasets[0].data.reduce((s, v) => s + v, 0);
+
+    meta.data.forEach((arc, i) => {
+      const value = data.datasets[0].data[i];
+      if (value === 0) return;
+
+      const pct = ((value / total) * 100).toFixed(0) + "%";
+
+      // Place label at 70% of the arc radius so it sits inside the petal
+      const midAngle  = arc.startAngle + (arc.endAngle - arc.startAngle) / 2;
+      const midRadius = arc.innerRadius + (arc.outerRadius - arc.innerRadius) * 0.68;
+
+      const x = arc.x + Math.cos(midAngle) * midRadius;
+      const y = arc.y + Math.sin(midAngle) * midRadius;
+
+      ctx.save();
+      ctx.font         = "bold 10px -apple-system, Arial, sans-serif";
+      ctx.fillStyle    = "#ffffff";
+      ctx.textAlign    = "center";
+      ctx.textBaseline = "middle";
+
+      // Only draw if the petal is large enough to fit the label
+      const arcLength = (arc.endAngle - arc.startAngle) * midRadius;
+      if (arcLength > 18) {
+        ctx.fillText(pct, x, y);
+      }
+      ctx.restore();
+    });
+  }
+};
+
+Chart.register(petalLabelPlugin);
+
 function renderRose(rose) {
   const canvas = document.getElementById("roseChart");
-
-  // Destroy previous instance to avoid memory leak on re-render
   if (roseChart) { roseChart.destroy(); roseChart = null; }
 
-  // Sort sectors by center_degrees so they always go N → NNE → NE etc.
   const sorted = [...rose].sort((a, b) => a.center_degrees - b.center_degrees);
+  const total  = sorted.reduce((s, x) => s + x.value, 0);
 
-  const labels  = sorted.map(s => DIR_LABELS[s.center_degrees] ?? `${s.center_degrees}°`);
-  const values  = sorted.map(s => parseFloat(s.value.toFixed(3)));
-  const colors  = values.map(speedColor);
+  const labels = sorted.map(s => DIR_LABELS[s.center_degrees] ?? `${s.center_degrees}°`);
+  const values = sorted.map(s => parseFloat(s.value.toFixed(4)));
+  const colors = values.map(speedColor);
 
   roseChart = new Chart(canvas, {
     type: "polarArea",
     data: {
       labels,
       datasets: [{
-        label: "Wind speed (m/s)",
+        label:           "Wind speed (m/s)",
         data:            values,
-        backgroundColor: colors.map(c => c + "cc"),  // slight transparency
-        borderColor:     colors,
-        borderWidth:     1,
+        backgroundColor: colors,       // solid fills — bold like GWA
+        borderColor:     "#ffffff",    // white dividers between sectors
+        borderWidth:     1.5,
       }]
     },
     options: {
       responsive:          true,
       maintainAspectRatio: false,
-      animation:           { duration: 500 },
-
-      // Rotate so North (0°) sits at the top
-      // Chart.js polar default starts at 3 o'clock (East)
-      // -90° shifts it to 12 o'clock (North)
-      startAngle: -Math.PI / 2,
+      animation:           { duration: 600 },
+      startAngle:          -Math.PI / 2,  // North at top
 
       scales: {
         r: {
           beginAtZero: true,
           ticks: {
-            font:          { size: 10 },
-            color:         "#888",
-            backdropColor: "rgba(255,255,255,0.75)",
-            callback:      v => v > 0 ? v.toFixed(1) : "",
+            font:          { size: 9 },
+            color:         "#999",
+            backdropColor: "rgba(255,255,255,0.8)",
+            // Show percentage on radial rings instead of raw values
+            callback: v => {
+              if (v === 0) return "";
+              const pct = ((v / total) * 100).toFixed(0);
+              return pct + "%";
+            },
           },
-          grid:        { color: "rgba(0,0,0,0.07)" },
-          angleLines:  { color: "rgba(0,0,0,0.07)" },
+          grid:       { color: "rgba(0,0,0,0.08)" },
+          angleLines: { color: "rgba(0,0,0,0.08)" },
           pointLabels: {
-            font:  { size: 11, weight: "500" },
+            font:  { size: 11, weight: "600" },
             color: "#333",
           },
         }
       },
 
       plugins: {
-        legend: { display: false },  // using custom HTML legend below
+        legend: { display: false },
         tooltip: {
           callbacks: {
             label: ctx => {
-              const s = sorted[ctx.dataIndex];
+              const s   = sorted[ctx.dataIndex];
+              const pct = ((s.value / total) * 100).toFixed(1);
               return [
-                ` Direction: ${DIR_LABELS[s.center_degrees]} (${s.center_degrees}°)`,
-                ` Wind speed: ${s.value.toFixed(2)} m/s`,
+                ` Direction:   ${DIR_LABELS[s.center_degrees]} (${s.center_degrees}°)`,
+                ` Wind speed:  ${s.value.toFixed(2)} m/s`,
+                ` Share:       ${pct}%`,
               ];
             }
           }
@@ -312,10 +323,7 @@ function renderRose(rose) {
   });
 }
 
-
-// ================================================================
-//  UI HELPERS
-// ================================================================
+// ── UI helpers ────────────────────────────────────────────────
 function updateHeader(params) {
   document.getElementById("site-name").textContent   = params.site_id;
   document.getElementById("site-coords").textContent =
@@ -325,30 +333,20 @@ function updateHeader(params) {
 }
 
 function updateStats(data) {
-  const rose = data.rose;
-
-  // Total power density comes directly from API response
-  const total = data.total ?? 0;
-
-  // Dominant direction = sector with highest wind speed value
-  const dominant = rose.reduce((best, s) => s.value > best.value ? s : best);
-
-  // Peak sector = same as dominant for speed rose
-  const peak = dominant;
+  const rose     = data.rose;
+  const total    = data.total ?? 0;
+  const dominant = rose.reduce((b, s) => s.value > b.value ? s : b);
 
   document.getElementById("stat-total").innerHTML =
     Math.round(total) + '<span class="stat-unit">W/m²</span>';
-
   document.getElementById("stat-dir").textContent =
     DIR_LABELS[dominant.center_degrees] ?? `${dominant.center_degrees}°`;
-
   document.getElementById("stat-peak").innerHTML =
-    peak.value.toFixed(1) + '<span class="stat-unit">m/s</span>';
+    dominant.value.toFixed(2) + '<span class="stat-unit">m/s</span>';
 }
 
 function updateLegend() {
-  const el = document.getElementById("legend");
-  el.innerHTML = SPEED_BINS.map(b =>
+  document.getElementById("legend").innerHTML = SPEED_BINS.map(b =>
     `<span class="legend-item">
        <span class="legend-swatch" style="background:${b.color}"></span>
        ${b.label}
@@ -358,8 +356,8 @@ function updateLegend() {
 
 function showMessage(text, isError = false) {
   const m = document.getElementById("message");
-  m.textContent  = text;
-  m.className    = isError ? "error" : "";
+  m.textContent   = text;
+  m.className     = isError ? "error" : "";
   m.style.display = "block";
   document.getElementById("chart-wrap").style.display = "none";
   document.getElementById("legend").style.display     = "none";
@@ -371,39 +369,28 @@ function showChart() {
   document.getElementById("legend").style.display     = "flex";
 }
 
-
-// ================================================================
-//  MAIN — fetch data and render everything
-// ================================================================
+// ── Main ──────────────────────────────────────────────────────
 async function load(params) {
   showMessage("Fetching wind data from Global Wind Atlas…");
-
   try {
     const data = await fetchWindRose(params.lat, params.lon, params.height);
-
     updateHeader(params);
     updateStats(data);
     updateLegend();
     renderRose(data.rose);
     showChart();
-
   } catch (err) {
     console.error("Wind rose error:", err);
-    showMessage(
-      `Could not load wind data: ${err.message}`,
-      true
-    );
+    showMessage(`Could not load wind data: ${err.message}`, true);
   }
 }
 
-// Re-fetch when height selector changes
 document.getElementById("height-select").addEventListener("change", e => {
-  const params   = getParams();
-  params.height  = parseInt(e.target.value, 10);
+  const params  = getParams();
+  params.height = parseInt(e.target.value, 10);
   load(params);
 });
 
-// Initial load — reads params from URL
 (function init() {
   const params = getParams();
   if (isNaN(params.lat) || isNaN(params.lon)) {
