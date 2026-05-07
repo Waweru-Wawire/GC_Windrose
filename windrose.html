@@ -33,13 +33,13 @@
     #stats {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 14px;
+      gap: 4px;
+      margin-bottom: 6px;
     }
     .stat-card {
       background: #f5f5f5;
       border-radius: 6px;
-      padding: 8px 10px;
+      padding: 5px 7px;
     }
     .stat-label {
       font-size: 10px;
@@ -48,13 +48,13 @@
       letter-spacing: 0.04em;
       margin-bottom: 2px;
     }
-    .stat-value { font-size: 18px; font-weight: 600; }
+    .stat-value { font-size: 14px; font-weight: 600; }
     .stat-unit  { font-size: 11px; color: #888; margin-left: 2px; }
     #controls {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 14px;
+      margin-bottom: 8px;
     }
     #controls label { font-size: 12px; color: #666; }
     #height-select {
@@ -65,23 +65,33 @@
       background: #fff;
       cursor: pointer;
     }
+    #chart-and-legend{
+      display: flex;
+      gap: 8px;
+      align-items:stretch
+    }
+      
     #chart-wrap {
       position: relative;
-      width: 100%;
-      height: 340px;
+      flex: 1;
+      height: 200px;
     }
     #legend {
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px 16px;
-      margin-top: 12px;
+      flex-direction: column;
+      justify-content:center;
+      gap:8px;
+      padding-left:6px;
+      border-left:1px solid #f0f0f0;
+      min-width:72px
     }
     .legend-item {
       display: flex;
       align-items: center;
       gap: 5px;
-      font-size: 11px;
+      font-size: 10px;
       color: #555;
+      white-space:no-wrap
     }
     .legend-swatch {
       width: 10px;
@@ -144,15 +154,16 @@
 
 <div id="message">Waiting for a site selection...</div>
 
-<div id="chart-wrap" style="display:none;">
+<div id="chart-and-legend">
+  <div id="chart-wrap">
   <canvas id="roseChart"
     role="img"
     aria-label="Polar area wind rose showing wind speed per 30-degree direction sector">
-    Wind rose chart: wind speed by direction sector.
+    Wind rose chart.
   </canvas>
 </div>
 
-<div id="legend" style="display:none;"></div>
+<div id="legend"></div> </div>
 
 <div id="attribution">
   Data: Global Wind Atlas 4.0, DTU Wind Energy / World Bank Group (ESMAP).
@@ -185,7 +196,7 @@ function getParams() {
     lat:     parseFloat(p.get("lat")    ?? "NaN"),
     lon:     parseFloat(p.get("lon")    ?? "NaN"),
     height:  parseInt(  p.get("height") ?? "100", 10),
-    site_id: p.get("site_id") ?? "Selected site",
+    site_id: "Site " + p.get("site_id") ?? "Selected site",
   };
 }
 
